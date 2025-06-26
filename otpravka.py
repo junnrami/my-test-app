@@ -1,8 +1,60 @@
+__version__ = "1.0.0"
 import time
 import logging
 import sys
 from pathlib import Path
 from playwright.sync_api import Playwright, sync_playwright
+import requests
+import subprocess
+
+VERSION_URL = "https://raw.githubusercontent.com/junnrami/my-test-app/main/version.json"
+
+
+def check_for_updates(current_version):
+    try:
+        response = requests.get(VERSION_URL)
+        version_data = response.json()
+        latest = version_data["latest_version"]
+        changelog = version_data.get("changelog", "")
+        download_url = version_data.get("download_url", "")
+
+        if latest != current_version:
+            print(f"🔔 Доступна новая версия: {latest}")
+            print(f"📋 Что нового:\n{changelog}")
+            choice = input("Хотите обновиться? [y/n]: ").strip().lower()
+            if choice == "y":
+                try:
+                    new_filename = "otpravka_new.exe"
+                    print("⬇️ Скачиваем новую версию...")
+
+                    r = requests.get(download_url, stream=True)
+                    r.raise_for_status()
+                    with open(new_filename, "wb") as f:
+                        for chunk in r.iter_content(chunk_size=8192):
+                            f.write(chunk)
+
+                    print("✅ Скачано. Запускаем обновляшку...")
+
+                    current_exe = Path(sys.executable)
+                    updater_path = current_exe.parent / "updater.exe"
+
+                    subprocess.Popen([str(updater_path), new_filename, current_exe.name])
+
+                    print("🛑 Завершаем текущую версию...")
+                    sys.exit(0)
+
+                except Exception as e:
+                    print(f"❌ Ошибка при обновлении: {e}")
+                    input("Нажмите Enter для выхода...")
+                    sys.exit(1)
+            else:
+                print("Продолжаем работу в текущей версии.")
+        else:
+            print("✅ У вас самая свежая версия.")
+
+    except Exception as e:
+        print(f"⚠️ Не удалось проверить обновления: {e}")
+
 
 # Настройка логирования
 logging.basicConfig(
@@ -26,8 +78,21 @@ def get_base_path() -> Path:
         return Path(__file__).parent
 
 
-def run(playwright: Playwright, url: str, login: str, password: str, codes_file: Path) -> None:
-    browser = playwright.chromium.launch(headless=False)
+def find_chromium_path():
+    user_home = Path.home()
+    base_path = user_home / "AppData" / "Local" / "ms-playwright"
+    if not base_path.exists():
+        return None
+    for item in base_path.iterdir():
+        if item.name.startswith("chromium"):
+            exe_path = item / "chrome-win" / "chrome.exe"
+            if exe_path.exists():
+                return str(exe_path)
+    return None
+
+
+def run(playwright: Playwright, url: str, login: str, password: str, codes_file: Path, chromium_path: str) -> None:
+    browser = playwright.chromium.launch(executable_path=chromium_path, headless=False)
     context = browser.new_context()
     page = context.new_page()
 
@@ -135,23 +200,31 @@ def read_stands_from_file(filepath: Path) -> list[dict]:
     return stands
 
 
-if __name__ == "__main__":
+def main():
+    check_for_updates(__version__)
     base_folder = get_base_path()
 
     codes_file = choose_file_interactive(base_folder, extensions={".txt", ".csv"}, prompt="Выберите файл, который содержит в себе список справочников")
     if codes_file is None:
         logger.error("Нет выбранного файла со списком кодов. Выход.")
-        exit()
+        sys.exit(1)
 
     stands_file = choose_file_interactive(base_folder, extensions={".txt", ".csv"}, prompt="Выберите файл, который содержит в себе список стендов")
     if stands_file is None:
         logger.error("Нет выбранного файла со списком стендов. Выход.")
-        exit()
+        sys.exit(1)
 
     stands = read_stands_from_file(stands_file)
     if not stands:
         logger.error("Список стендов пустой. Выход.")
-        exit()
+        sys.exit(1)
+
+    chromium_path = find_chromium_path()
+    if chromium_path is None:
+        print("\nОшибка: Chromium-браузер Playwright не найден.")
+        print("Пожалуйста, установите браузеры Playwright, запустив в командной строке:")
+        print("  playwright install\n")
+        sys.exit(1)
 
     with sync_playwright() as playwright:
         for stand in stands:
@@ -159,7 +232,7 @@ if __name__ == "__main__":
             start_time = time.time()
 
             try:
-                run(playwright, stand['url'], stand['login'], stand['password'], codes_file)
+                run(playwright, stand['url'], stand['login'], stand['password'], codes_file, chromium_path)
             except Exception as e:
                 logger.error(f"Ошибка при работе со стендом '{stand['name']}' ({stand['url']}): {e}")
                 logger.info("Продолжаем со следующим стендом...")
@@ -167,3 +240,7 @@ if __name__ == "__main__":
 
             elapsed = time.time() - start_time
             logger.info(f"Закончена отправка справочников со стенда '{stand['name']}'. Потребовалось {elapsed:.1f} секунд.")
+
+
+if __name__ == "__main__":
+    main()
