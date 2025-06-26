@@ -1,6 +1,6 @@
 {
-  "latest_version": "1.0.0",
-  "changelog": "Первая версия программы",
-  "download_url": "https://github.com/junnrami/my-test-app/releases/download/v1.0.0/otpravka.exe",
+  "latest_version": "1.0.3",
+  "changelog": "Добавлена пауза между ссылкой и закрытием приложения, чтобы пользователь смог ее комфортно скопировать",
+  "download_url": "https://github.com/junnrami/my-test-app/releases/download/v1.0.3/otpravka.exe",
   "previous_versions": {}
 }
